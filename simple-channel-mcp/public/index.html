@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code Session</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  :root {
+    --bg: #1a1b26;
+    --surface: #24283b;
+    --surface2: #292e42;
+    --border: #3b4261;
+    --text: #c0caf5;
+    --text-dim: #565f89;
+    --accent: #7aa2f7;
+    --green: #9ece6a;
+    --red: #f7768e;
+    --orange: #e0af68;
+    --purple: #bb9af7;
+    --cyan: #7dcfff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* === Header === */
+  header {
+    padding: 10px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 14px; font-weight: 600; }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--red);
+    flex-shrink: 0;
+  }
+  .status-dot.connected { background: var(--green); }
+  .status-text { font-size: 12px; color: var(--text-dim); }
+  .header-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .token-counter { color: var(--text); }
+  .token-counter .label { color: var(--text-dim); }
+
+  /* === Activity Bar === */
+  .activity-bar {
+    padding: 6px 20px;
+    background: var(--surface2);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .activity-indicator {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .activity-indicator.thinking {
+    background: var(--orange);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  .activity-indicator.tool_running {
+    background: var(--cyan);
+    animation: pulse 0.8s ease-in-out infinite;
+  }
+  .activity-indicator.waiting_permission {
+    background: var(--orange);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* === Session Bar === */
+  .session-bar {
+    padding: 5px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-dim);
+    display: none;
+    gap: 12px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .session-bar.visible { display: flex; }
+  .session-bar span { white-space: nowrap; }
+  .session-bar .label { color: var(--text-dim); }
+  .session-bar .value { color: var(--text); }
+
+  /* === Main Layout === */
+  .main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* === Messages Panel === */
+  .messages-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
+  }
+  .messages-toolbar {
+    padding: 6px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .view-toggle {
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .view-toggle.active {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+  }
+
+  /* === Message Bubbles === */
+  .msg {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.6;
+    max-width: 90%;
+    word-break: break-word;
+  }
+  .msg.inbound {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    margin-right: auto;
+  }
+  .msg.outbound {
+    background: #1a2744;
+    border: 1px solid #2a3f6b;
+    margin-left: auto;
+  }
+
+  /* === Inline Permission Request === */
+  .msg.permission {
+    background: #2a2218;
+    border: 1px solid #4a3a20;
+    margin-left: auto;
+    margin-right: auto;
+    max-width: 95%;
+  }
+  .perm-inline-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .perm-inline-badge {
+    padding: 2px 8px;
+    background: var(--orange);
+    color: var(--bg);
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .perm-inline-tool {
+    font-weight: 600;
+    color: var(--orange);
+    font-size: 14px;
+  }
+  .perm-inline-desc {
+    color: var(--text-dim);
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .perm-inline-preview {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 10px;
+    font-size: 12px;
+  }
+  .perm-file-path {
+    padding: 8px 12px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    color: var(--cyan);
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .perm-diff {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .perm-diff-line {
+    padding: 1px 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .perm-diff-line.add {
+    background: rgba(158, 206, 106, 0.1);
+    color: var(--green);
+  }
+  .perm-diff-line.add::before { content: '+ '; color: var(--green); font-weight: 700; }
+  .perm-diff-line.del {
+    background: rgba(247, 118, 142, 0.1);
+    color: var(--red);
+  }
+  .perm-diff-line.del::before { content: '- '; color: var(--red); font-weight: 700; }
+  .perm-diff-line.ctx {
+    color: var(--text-dim);
+  }
+  .perm-diff-line.ctx::before { content: '  '; }
+  .perm-diff-section-label {
+    padding: 6px 12px 2px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+  }
+  .perm-command-box {
+    padding: 10px 12px;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: 12px;
+  }
+  .perm-command-box .cmd-prefix {
+    color: var(--green);
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .perm-raw-preview {
+    padding: 10px 12px;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: 11px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .perm-inline-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .perm-inline-actions button {
+    padding: 8px 24px;
+    border: none;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .perm-resolved {
+    opacity: 0.5;
+  }
+  .perm-resolved .perm-inline-actions { display: none; }
+  .perm-resolved-badge {
+    display: none;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .perm-resolved .perm-resolved-badge { display: inline-block; }
+  .perm-resolved-badge.allowed { background: var(--green); color: var(--bg); }
+  .perm-resolved-badge.denied { background: var(--red); color: var(--bg); }
+
+  .msg-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .msg-meta {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .msg-meta .direction {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .msg-meta .direction.inbound { color: var(--green); }
+  .msg-meta .direction.outbound { color: var(--accent); }
+  .msg-view-toggles {
+    display: flex;
+    gap: 2px;
+  }
+  .msg-view-btn {
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 10px;
+    cursor: pointer;
+    line-height: 1.4;
+  }
+  .msg-view-btn.active {
+    background: var(--surface2);
+    color: var(--text);
+    border-color: var(--text-dim);
+  }
+  .msg-content { white-space: pre-wrap; }
+  .msg-content.raw-json {
+    font-size: 11px;
+    color: var(--text-dim);
+    background: var(--bg);
+    padding: 8px;
+    border-radius: 4px;
+    overflow-x: auto;
+  }
+
+  /* === Markdown Styles === */
+  .md-content { white-space: normal; }
+  .md-content h1, .md-content h2, .md-content h3,
+  .md-content h4, .md-content h5, .md-content h6 {
+    margin: 12px 0 6px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .md-content h1 { font-size: 16px; }
+  .md-content h2 { font-size: 14px; }
+  .md-content h3 { font-size: 13px; color: var(--accent); }
+  .md-content p { margin: 6px 0; }
+  .md-content ul, .md-content ol { margin: 6px 0; padding-left: 20px; }
+  .md-content li { margin: 3px 0; }
+  .md-content code {
+    background: var(--bg);
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+    color: var(--cyan);
+  }
+  .md-content pre {
+    background: var(--bg);
+    padding: 10px 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 8px 0;
+    border: 1px solid var(--border);
+  }
+  .md-content pre code {
+    background: none;
+    padding: 0;
+    color: var(--text);
+    font-size: 12px;
+  }
+  .md-content blockquote {
+    border-left: 3px solid var(--accent);
+    padding-left: 12px;
+    margin: 8px 0;
+    color: var(--text-dim);
+  }
+  .md-content a { color: var(--accent); text-decoration: underline; }
+  .md-content table {
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 12px;
+  }
+  .md-content th, .md-content td {
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+  }
+  .md-content th { background: var(--surface2); }
+  .md-content hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 12px 0;
+  }
+  .md-content strong { color: var(--text); }
+  .md-content em { font-style: italic; color: var(--purple); }
+
+  /* === Input Bar === */
+  .input-bar {
+    padding: 12px 20px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .input-bar textarea {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 10px 12px;
+    resize: none;
+    outline: none;
+    min-height: 42px;
+    max-height: 120px;
+  }
+  .input-bar textarea:focus { border-color: var(--accent); }
+  .input-bar button {
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 6px;
+    padding: 0 20px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .input-bar button:hover { opacity: 0.9; }
+
+  /* === Sidebar === */
+  .sidebar {
+    width: 300px;
+    border-left: 1px solid var(--border);
+    background: var(--surface);
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  .sidebar-section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-section h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+
+  /* === Command Menu === */
+  .cmd-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .cmd-btn {
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .cmd-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* === Stats === */
+  .stats {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+  .stats span { color: var(--text); }
+
+  /* === Background Process Cards === */
+  .proc-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .proc-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .proc-status-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .proc-status-dot.running {
+    background: var(--green);
+    animation: pulse 1s ease-in-out infinite;
+  }
+  .proc-status-dot.completed { background: var(--green); }
+  .proc-status-dot.failed { background: var(--red); }
+  .proc-command {
+    color: var(--cyan);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .proc-output {
+    background: var(--surface2);
+    padding: 6px 8px;
+    border-radius: 4px;
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    max-height: 80px;
+    overflow-y: auto;
+  }
+  .proc-output.expanded { max-height: none; }
+  .proc-meta {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .empty-state {
+    color: var(--text-dim);
+    font-size: 12px;
+    font-style: italic;
+  }
+
+  /* === Modal === */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    min-width: 500px;
+    max-width: 80vw;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  .modal h3 {
+    font-size: 14px;
+    margin-bottom: 16px;
+    color: var(--accent);
+  }
+  .modal-close {
+    float: right;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 18px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .modal-close:hover { color: var(--text); }
+  .modal pre {
+    background: var(--bg);
+    padding: 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+  }
+
+  .btn-allow { background: var(--green); color: var(--bg); }
+  .btn-deny { background: var(--red); color: var(--bg); }
+  .btn-allow:hover, .btn-deny:hover { opacity: 0.9; }
+
+  /* === Tool Event Cards (inline in chat) === */
+  .tool-event {
+    margin-bottom: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    max-width: 95%;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .tool-event.completed { opacity: 0.7; }
+  .tool-event.error { border-color: var(--red); }
+  .tool-event-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tool-event-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .tool-event-dot.running { background: var(--cyan); animation: pulse 0.8s ease-in-out infinite; }
+  .tool-event-dot.completed { background: var(--green); }
+  .tool-event-dot.error { background: var(--red); }
+  .tool-event-name {
+    font-weight: 600;
+    color: var(--purple);
+  }
+  .tool-event-summary {
+    color: var(--text-dim);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tool-event-body {
+    margin-top: 6px;
+  }
+  .tool-event-body .perm-inline-preview {
+    margin-bottom: 0;
+  }
+  .tool-event-output {
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: var(--bg);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    max-height: 100px;
+    overflow-y: auto;
+  }
+  .tool-event-toggle {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    padding: 0;
+    margin-left: auto;
+  }
+  .tool-event-toggle:hover { color: var(--text); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="status-dot" id="statusDot"></div>
+  <h1>Claude Code Session</h1>
+  <span class="status-text" id="statusText">Connecting...</span>
+  <div class="header-right">
+    <div class="token-counter" id="tokenCounter"></div>
+  </div>
+</header>
+
+<div class="session-bar" id="sessionBar"></div>
+
+<div class="main">
+  <div class="messages-panel">
+    <div class="messages-toolbar">
+      <span style="font-size:11px;color:var(--text-dim);margin-right:8px">View:</span>
+      <button class="view-toggle active" onclick="setGlobalView('rendered')" id="vt-rendered">Rendered</button>
+      <button class="view-toggle" onclick="setGlobalView('raw')" id="vt-raw">Raw</button>
+      <button class="view-toggle" onclick="setGlobalView('json')" id="vt-json">JSON</button>
+    </div>
+    <div class="messages" id="messages"></div>
+    <div class="input-bar">
+      <textarea id="input" placeholder="Send a message to Claude..." rows="1" autofocus></textarea>
+      <button onclick="send()">Send</button>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <h2>Commands</h2>
+      <div class="cmd-grid" id="commandMenu"></div>
+    </div>
+    <div class="sidebar-section">
+      <h2>Stats</h2>
+      <div class="stats" id="stats"></div>
+    </div>
+    <div class="sidebar-section">
+      <h2>Background Processes</h2>
+      <div id="bgProcesses"><div class="empty-state">None</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal" id="modal"></div>
+</div>
+
+<script>
+// === Configuration ===
+const COMMANDS = [
+  { label: '/status', desc: 'Session status' },
+  { label: '/usage', desc: 'Token usage' },
+  { label: '/compact', desc: 'Compact context' },
+  { label: '/cost', desc: 'Session cost' },
+  { label: '/help', desc: 'Show help' },
+];
+
+// === State ===
+let ws, connected = false;
+const seenMessageIds = new Set();
+const messageData = new Map();
+const messageViewModes = new Map();
+const pendingPerms = new Map();
+const resolvedPerms = new Map(); // id → 'allowed' | 'denied'
+const toolEvents = new Map();    // id → ToolEvent
+const bgProcs = new Map();
+let currentActivity = { status: 'idle', timestamp: Date.now() };
+let sessionInfo = {};
+let globalViewMode = 'rendered';
+let tokenCounterInterval = null;
+
+// === Elements ===
+const messagesEl = document.getElementById('messages');
+const inputEl = document.getElementById('input');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const statsEl = document.getElementById('stats');
+const activityDot = document.getElementById('activityDot');
+const activityText = document.getElementById('activityText');
+const sessionBar = document.getElementById('sessionBar');
+const bgProcessesEl = document.getElementById('bgProcesses');
+const commandMenuEl = document.getElementById('commandMenu');
+const tokenCounterEl = document.getElementById('tokenCounter');
+
+// === Markdown Setup ===
+if (typeof marked !== 'undefined') {
+  marked.setOptions({ breaks: true, gfm: true });
+}
+
+function renderMarkdown(text) {
+  if (typeof marked !== 'undefined') {
+    try { return marked.parse(text); } catch(e) { /* fall through */ }
+  }
+  return escapeHtml(text);
+}
+
+// === WebSocket ===
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}`);
+
+  ws.onopen = () => {
+    connected = true;
+    statusDot.classList.add('connected');
+    statusText.textContent = 'Connected';
+  };
+
+  ws.onclose = () => {
+    connected = false;
+    statusDot.classList.remove('connected');
+    statusText.textContent = 'Disconnected — reconnecting...';
+    setTimeout(connect, 2000);
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    switch (msg.type) {
+      case 'message':
+        if (!seenMessageIds.has(msg.message.id)) {
+          seenMessageIds.add(msg.message.id);
+          messageData.set(msg.message.id, msg.message);
+          appendMessage(msg.message);
+        }
+        break;
+      case 'status':
+        updateStats();
+        break;
+      case 'activity':
+        currentActivity = msg.activity;
+        renderActivity();
+        break;
+      case 'session_info':
+        Object.assign(sessionInfo, msg.info);
+        renderSessionInfo();
+        renderTokenCounter();
+        break;
+      case 'permission_request':
+        pendingPerms.set(msg.request.request_id, msg.request);
+        appendPermissionInline(msg.request);
+        break;
+      case 'permission_resolved':
+        pendingPerms.delete(msg.request_id);
+        markPermissionResolved(msg.request_id, resolvedPerms.get(msg.request_id) || 'allowed');
+        break;
+      case 'tool_event':
+        toolEvents.set(msg.event.id, msg.event);
+        appendOrUpdateToolEvent(msg.event);
+        break;
+      case 'background_process':
+        bgProcs.set(msg.process.process_id, msg.process);
+        renderBgProcesses();
+        break;
+    }
+  };
+}
+
+// === Message Rendering ===
+function appendMessage(msg) {
+  const div = document.createElement('div');
+  div.className = `msg ${msg.direction}`;
+  div.id = `msg-${msg.id}`;
+  div.innerHTML = buildMessageHTML(msg);
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  updateStats();
+}
+
+function buildMessageHTML(msg) {
+  const time = new Date(msg.timestamp).toLocaleTimeString();
+  const label = msg.direction === 'inbound' ? 'You' : 'Claude';
+  const viewMode = messageViewModes.get(msg.id) || globalViewMode;
+  const content = renderMessageContent(msg, viewMode);
+
+  return `
+    <div class="msg-header">
+      <div class="msg-meta">
+        <span class="direction ${msg.direction}">${label}</span> · ${time}
+      </div>
+      <div class="msg-view-toggles">
+        <button class="msg-view-btn ${viewMode === 'rendered' ? 'active' : ''}" onclick="setMsgView('${msg.id}','rendered')">MD</button>
+        <button class="msg-view-btn ${viewMode === 'raw' ? 'active' : ''}" onclick="setMsgView('${msg.id}','raw')">Raw</button>
+        <button class="msg-view-btn ${viewMode === 'json' ? 'active' : ''}" onclick="setMsgView('${msg.id}','json')">JSON</button>
+      </div>
+    </div>
+    <div class="msg-body">${content}</div>`;
+}
+
+function renderMessageContent(msg, viewMode) {
+  if (viewMode === 'json') {
+    return `<div class="msg-content raw-json">${escapeHtml(JSON.stringify(msg, null, 2))}</div>`;
+  }
+  if (viewMode === 'raw') {
+    return `<div class="msg-content">${escapeHtml(msg.content)}</div>`;
+  }
+  if (msg.direction === 'outbound' && msg.format !== 'plain') {
+    return `<div class="md-content">${renderMarkdown(msg.content)}</div>`;
+  }
+  return `<div class="msg-content">${escapeHtml(msg.content)}</div>`;
+}
+
+function setGlobalView(mode) {
+  globalViewMode = mode;
+  document.querySelectorAll('.view-toggle').forEach(b => b.classList.remove('active'));
+  document.getElementById(`vt-${mode}`).classList.add('active');
+  rerenderAllMessages();
+}
+
+function setMsgView(id, mode) {
+  messageViewModes.set(id, mode);
+  const el = document.getElementById(`msg-${id}`);
+  const msg = messageData.get(id);
+  if (el && msg) el.innerHTML = buildMessageHTML(msg);
+}
+
+function rerenderAllMessages() {
+  // Save permission elements separately since they're interleaved
+  const permEls = {};
+  messagesEl.querySelectorAll('.msg.permission').forEach(el => {
+    permEls[el.id] = el.cloneNode(true);
+  });
+  messagesEl.innerHTML = '';
+  // Re-append in order (messages + permissions interleaved by data attribute)
+  const allItems = [...messageData.values()].map(m => ({ type: 'msg', data: m, ts: m.timestamp }));
+  pendingPerms.forEach((p) => allItems.push({ type: 'perm', data: p, ts: p.timestamp }));
+  allItems.sort((a, b) => a.ts - b.ts);
+
+  for (const item of allItems) {
+    if (item.type === 'msg') {
+      const div = document.createElement('div');
+      div.className = `msg ${item.data.direction}`;
+      div.id = `msg-${item.data.id}`;
+      div.innerHTML = buildMessageHTML(item.data);
+      messagesEl.appendChild(div);
+    } else {
+      const existingEl = permEls[`perm-${item.data.request_id}`];
+      if (existingEl) {
+        messagesEl.appendChild(existingEl);
+      } else {
+        appendPermissionInline(item.data, false);
+      }
+    }
+  }
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// === Inline Permission Requests ===
+function appendPermissionInline(perm, scroll = true) {
+  const div = document.createElement('div');
+  div.className = 'msg permission';
+  div.id = `perm-${perm.request_id}`;
+
+  const preview = formatPermissionPreview(perm);
+  const time = new Date(perm.timestamp).toLocaleTimeString();
+
+  div.innerHTML = `
+    <div class="perm-inline-header">
+      <span class="perm-inline-badge">Permission Request</span>
+      <span class="perm-inline-tool">${escapeHtml(perm.tool_name)}</span>
+      <span style="font-size:11px;color:var(--text-dim);margin-left:auto">${time}</span>
+      <span class="perm-resolved-badge" id="perm-badge-${perm.request_id}"></span>
+    </div>
+    <div class="perm-inline-preview">${preview}</div>
+    <div class="perm-inline-actions">
+      <button class="btn-allow" onclick="handlePermission('${perm.request_id}', 'allow')">Allow</button>
+      <button class="btn-deny" onclick="handlePermission('${perm.request_id}', 'deny')">Deny</button>
+    </div>`;
+
+  messagesEl.appendChild(div);
+  if (scroll) messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function formatPermissionPreview(perm) {
+  const raw = perm.input_preview || '';
+  const parsed = tryParseJSON(raw);
+
+  if (!parsed) {
+    return `<div class="perm-raw-preview">${escapeHtml(raw)}</div>`;
+  }
+
+  // Edit tool: file_path + old_string/new_string diff
+  if (parsed.file_path && (parsed.old_string != null || parsed.new_string != null)) {
+    let html = `<div class="perm-file-path">${escapeHtml(parsed.file_path)}</div>`;
+    html += '<div class="perm-diff">';
+    if (parsed.old_string != null) {
+      const oldLines = String(parsed.old_string).split('\n');
+      for (const line of oldLines) {
+        html += `<div class="perm-diff-line del">${escapeHtml(line)}</div>`;
+      }
+    }
+    if (parsed.new_string != null) {
+      const newLines = String(parsed.new_string).split('\n');
+      for (const line of newLines) {
+        html += `<div class="perm-diff-line add">${escapeHtml(line)}</div>`;
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+
+  // Write tool: file_path + content
+  if (parsed.file_path && parsed.content != null) {
+    let html = `<div class="perm-file-path">${escapeHtml(parsed.file_path)}</div>`;
+    html += '<div class="perm-diff">';
+    const lines = String(parsed.content).split('\n').slice(0, 50);
+    for (const line of lines) {
+      html += `<div class="perm-diff-line add">${escapeHtml(line)}</div>`;
+    }
+    if (String(parsed.content).split('\n').length > 50) {
+      html += `<div class="perm-diff-section-label">... truncated</div>`;
+    }
+    html += '</div>';
+    return html;
+  }
+
+  // Read tool: just file path
+  if (parsed.file_path) {
+    return `<div class="perm-file-path">${escapeHtml(parsed.file_path)}</div>`;
+  }
+
+  // Bash tool: command
+  if (parsed.command != null) {
+    const cmd = String(parsed.command);
+    return `<div class="perm-command-box"><span class="cmd-prefix">$</span>${escapeHtml(cmd)}</div>`;
+  }
+
+  // Glob/Grep: pattern
+  if (parsed.pattern != null) {
+    let html = `<div class="perm-command-box">`;
+    if (parsed.path) html += `<span style="color:var(--cyan)">${escapeHtml(parsed.path)}</span> `;
+    html += `<span style="color:var(--orange)">${escapeHtml(parsed.pattern)}</span>`;
+    if (parsed.glob) html += ` <span style="color:var(--text-dim)">${escapeHtml(parsed.glob)}</span>`;
+    html += '</div>';
+    return html;
+  }
+
+  // Fallback: pretty-print whatever we parsed
+  return `<div class="perm-raw-preview">${escapeHtml(JSON.stringify(parsed, null, 2))}</div>`;
+}
+
+// Parse JSON that may be truncated (ending with …)
+function tryParseJSON(s) {
+  if (!s) return null;
+  // Try direct parse first
+  try { return JSON.parse(s); } catch {}
+  // If truncated (ends with … or ...), try to extract key-value pairs via regex
+  const result = {};
+  // Match "key":"value" or "key":number patterns
+  const strPattern = /"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+  const numPattern = /"(\w+)"\s*:\s*(-?\d+\.?\d*)/g;
+  const boolPattern = /"(\w+)"\s*:\s*(true|false)/g;
+  let m;
+  while ((m = strPattern.exec(s)) !== null) {
+    result[m[1]] = m[2].replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
+  }
+  while ((m = numPattern.exec(s)) !== null) {
+    result[m[1]] = parseFloat(m[2]);
+  }
+  while ((m = boolPattern.exec(s)) !== null) {
+    result[m[1]] = m[2] === 'true';
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+function handlePermission(requestId, behavior) {
+  if (!connected) return;
+  resolvedPerms.set(requestId, behavior === 'allow' ? 'allowed' : 'denied');
+  ws.send(JSON.stringify({ type: 'permission', request_id: requestId, behavior }));
+  markPermissionResolved(requestId, behavior === 'allow' ? 'allowed' : 'denied');
+}
+
+function markPermissionResolved(requestId, verdict) {
+  const el = document.getElementById(`perm-${requestId}`);
+  if (!el) return;
+  el.classList.add('perm-resolved');
+  const badge = document.getElementById(`perm-badge-${requestId}`);
+  if (badge) {
+    badge.textContent = verdict;
+    badge.className = `perm-resolved-badge ${verdict}`;
+  }
+}
+
+// === Tool Events (inline in chat) ===
+function appendOrUpdateToolEvent(evt) {
+  const existingEl = document.getElementById(`tool-${evt.id}`);
+  if (existingEl) {
+    existingEl.innerHTML = buildToolEventHTML(evt);
+    existingEl.className = `tool-event ${evt.status}`;
+    return;
+  }
+  const div = document.createElement('div');
+  div.className = `tool-event ${evt.status}`;
+  div.id = `tool-${evt.id}`;
+  div.innerHTML = buildToolEventHTML(evt);
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function buildToolEventHTML(evt) {
+  const time = new Date(evt.timestamp).toLocaleTimeString();
+  let html = `
+    <div class="tool-event-header">
+      <div class="tool-event-dot ${evt.status}"></div>
+      <span class="tool-event-name">${escapeHtml(evt.tool_name)}</span>
+      <span style="font-size:10px;color:var(--text-dim)">${time}</span>
+      <button class="tool-event-toggle" onclick="toggleToolEventBody('${evt.id}')">details</button>
+    </div>`;
+
+  // Build the body (collapsible)
+  html += `<div class="tool-event-body" id="tool-body-${evt.id}" style="display:none">`;
+
+  // Try to render input_summary as a diff/structured view
+  const structured = tryFormatToolInput(evt.tool_name, evt.input_summary);
+  if (structured) {
+    html += `<div class="perm-inline-preview">${structured}</div>`;
+  } else {
+    html += `<div class="tool-event-output">${escapeHtml(evt.input_summary)}</div>`;
+  }
+
+  if (evt.output_summary) {
+    html += `<div class="tool-event-output" style="margin-top:4px;border-left:2px solid var(--green);padding-left:8px">${escapeHtml(evt.output_summary)}</div>`;
+  }
+  html += '</div>';
+
+  return html;
+}
+
+function tryFormatToolInput(toolName, summary) {
+  // Try to parse as JSON first
+  const parsed = tryParseJSON(summary);
+  if (!parsed) return null;
+
+  // Edit: show diff
+  if (toolName === 'Edit' && parsed.file_path) {
+    let html = `<div class="perm-file-path">${escapeHtml(parsed.file_path)}</div><div class="perm-diff">`;
+    if (parsed.old_string != null) {
+      for (const line of String(parsed.old_string).split('\n')) {
+        html += `<div class="perm-diff-line del">${escapeHtml(line)}</div>`;
+      }
+    }
+    if (parsed.new_string != null) {
+      for (const line of String(parsed.new_string).split('\n')) {
+        html += `<div class="perm-diff-line add">${escapeHtml(line)}</div>`;
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+
+  // Write: show file + preview
+  if (toolName === 'Write' && parsed.file_path) {
+    let html = `<div class="perm-file-path">${escapeHtml(parsed.file_path)}</div>`;
+    if (parsed.content) {
+      html += '<div class="perm-diff">';
+      for (const line of String(parsed.content).split('\n').slice(0, 20)) {
+        html += `<div class="perm-diff-line add">${escapeHtml(line)}</div>`;
+      }
+      html += '</div>';
+    }
+    return html;
+  }
+
+  // Read: show file path
+  if (toolName === 'Read' && parsed.file_path) {
+    return `<div class="perm-file-path">${escapeHtml(parsed.file_path)}</div>`;
+  }
+
+  // Bash: show command
+  if (toolName === 'Bash' && parsed.command) {
+    return `<div class="perm-command-box"><span class="cmd-prefix">$</span>${escapeHtml(parsed.command)}</div>`;
+  }
+
+  // Grep/Glob
+  if (parsed.pattern) {
+    let html = `<div class="perm-command-box">`;
+    if (parsed.path) html += `<span style="color:var(--cyan)">${escapeHtml(parsed.path)}</span> `;
+    html += `<span style="color:var(--orange)">${escapeHtml(parsed.pattern)}</span>`;
+    html += '</div>';
+    return html;
+  }
+
+  return null;
+}
+
+function toggleToolEventBody(id) {
+  const body = document.getElementById(`tool-body-${id}`);
+  if (body) body.style.display = body.style.display === 'none' ? 'block' : 'none';
+}
+
+// === Activity ===
+function renderActivity() {
+  const a = currentActivity;
+  activityDot.className = `activity-indicator ${a.status}`;
+  let text = 'Idle';
+  if (a.status === 'thinking') text = 'Thinking...';
+  else if (a.status === 'tool_running') {
+    text = a.tool_name ? `Running ${a.tool_name}` : 'Running tool';
+    if (a.detail) text += `: ${a.detail}`;
+  } else if (a.status === 'waiting_permission') text = 'Waiting for permission...';
+  activityText.textContent = text;
+}
+
+// === Token Counter (real-time in header) ===
+function renderTokenCounter() {
+  const s = sessionInfo;
+  if (s.tokens_used == null) return;
+  const limit = s.tokens_limit ? ` / ${fmtNum(s.tokens_limit)}` : '';
+  const cost = s.cost_usd != null ? ` · $${s.cost_usd.toFixed(2)}` : '';
+  tokenCounterEl.innerHTML = `<span class="label">Tokens:</span> ${fmtNum(s.tokens_used)}${limit}${cost}`;
+}
+
+// === Session Info ===
+function renderSessionInfo() {
+  const s = sessionInfo;
+  const parts = [];
+  if (s.model) parts.push(`<span class="label">Model:</span> <span class="value">${escapeHtml(s.model)}</span>`);
+  if (s.session_id) parts.push(`<span class="label">Session:</span> <span class="value">${escapeHtml(s.session_id.slice(0, 8))}...</span>`);
+  if (s.cwd) parts.push(`<span class="label">CWD:</span> <span class="value">${escapeHtml(s.cwd)}</span>`);
+
+  if (parts.length > 0) {
+    sessionBar.innerHTML = parts.join('<span style="color:var(--border)"> · </span>');
+    sessionBar.classList.add('visible');
+  }
+}
+
+// === Background Processes ===
+function renderBgProcesses() {
+  if (bgProcs.size === 0) {
+    bgProcessesEl.innerHTML = '<div class="empty-state">None</div>';
+    return;
+  }
+  bgProcessesEl.innerHTML = '';
+  for (const [id, proc] of bgProcs) {
+    const card = document.createElement('div');
+    card.className = 'proc-card';
+    let html = `
+      <div class="proc-header">
+        <div class="proc-status-dot ${proc.status}"></div>
+        <div class="proc-command" title="${escapeHtml(proc.command)}">${escapeHtml(proc.command)}</div>
+      </div>`;
+    if (proc.output) {
+      html += `<div class="proc-output" onclick="event.stopPropagation();this.classList.toggle('expanded')">${escapeHtml(truncate(proc.output, 500))}</div>`;
+    }
+    const elapsed = formatUptime(proc.updated_at - proc.started_at);
+    let meta = `${proc.status} · ${elapsed}`;
+    if (proc.exit_code != null) meta += ` · exit ${proc.exit_code}`;
+    html += `<div class="proc-meta">${meta}</div>`;
+    card.innerHTML = html;
+    card.onclick = () => showProcessModal(proc);
+    bgProcessesEl.appendChild(card);
+  }
+}
+
+function showProcessModal(proc) {
+  const modal = document.getElementById('modal');
+  modal.innerHTML = `
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <h3>Background Process</h3>
+    <p style="margin-bottom:8px"><strong>Command:</strong> <code>${escapeHtml(proc.command)}</code></p>
+    <p style="margin-bottom:8px"><strong>Status:</strong> ${proc.status}${proc.exit_code != null ? ` (exit ${proc.exit_code})` : ''}</p>
+    <p style="margin-bottom:8px"><strong>Duration:</strong> ${formatUptime(proc.updated_at - proc.started_at)}</p>
+    ${proc.output ? `<p style="margin-bottom:4px"><strong>Output:</strong></p><pre>${escapeHtml(proc.output)}</pre>` : ''}
+  `;
+  document.getElementById('modalOverlay').classList.add('visible');
+}
+
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modalOverlay')) {
+    document.getElementById('modalOverlay').classList.remove('visible');
+  }
+}
+
+// === Commands ===
+function renderCommandMenu() {
+  commandMenuEl.innerHTML = COMMANDS.map(c =>
+    `<button class="cmd-btn" onclick="sendCommand('${c.label}')" title="${c.desc}">${c.label}</button>`
+  ).join('');
+}
+
+function sendCommand(cmd) {
+  if (!connected) return;
+  ws.send(JSON.stringify({ type: 'command', command: cmd }));
+}
+
+// === Actions ===
+function send() {
+  const text = inputEl.value.trim();
+  if (!text || !connected) return;
+  ws.send(JSON.stringify({ type: 'send', text }));
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+}
+
+// === Helpers ===
+function escapeHtml(s) {
+  if (s == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+function truncate(s, max) {
+  if (!s || s.length <= max) return s;
+  return s.slice(0, max) + '...';
+}
+
+function fmtNum(n) {
+  return n.toLocaleString();
+}
+
+function updateStats() {
+  const count = seenMessageIds.size;
+  const perms = pendingPerms.size;
+  statsEl.innerHTML = `Messages: <span>${count}</span><br>Processes: <span>${bgProcs.size}</span>${perms > 0 ? `<br>Pending: <span style="color:var(--orange)">${perms}</span>` : ''}`;
+}
+
+function formatUptime(ms) {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+// Refresh stats periodically
+setInterval(() => updateStats(), 5000);
+
+// Auto-resize textarea
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+});
+
+// Send on Enter (Shift+Enter for newline)
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+
+// Close modal on Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeModal();
+});
+
+// === Init ===
+renderCommandMenu();
+renderActivity();
+connect();
+</script>
+
+<div class="activity-bar" id="activityBar">
+  <div class="activity-indicator" id="activityDot"></div>
+  <span id="activityText">Idle</span>
+</div>
+
+</body>
+</html>

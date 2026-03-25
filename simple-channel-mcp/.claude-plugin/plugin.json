@@ -1,0 +1,6 @@
+{
+  "name": "simple-channel",
+  "version": "0.1.0",
+  "description": "Simple MCP channel server for Claude Code",
+  "mcpServers": "../.mcp.json"
+}

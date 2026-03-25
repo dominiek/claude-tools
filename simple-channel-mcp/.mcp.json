@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "simple-channel": {
+      "command": "node",
+      "args": ["/Users/dodo/checkouts/simple-channel-mcp/build/index.js"],
+      "env": {
+        "PORT": "3100"
+      }
+    }
+  }
+}
